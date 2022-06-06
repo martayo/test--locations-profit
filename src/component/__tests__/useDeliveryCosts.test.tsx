@@ -1,99 +1,138 @@
-import { ReactNode } from 'react';
-import { render, screen } from '@testing-library/react';
-
-import { LocationProfitProvider, useDeliveryCosts } from '../hooks';
-import { CostByLocation } from '../elements';
+import { renderHook } from '@testing-library/react';
+import { useDeliveryCosts } from '../hooks';
 import { DevaluationPerKilometer, CostPerKilometer, CostPerTravel } from '../constants';
 
 describe('useDeliveryCosts', () => {
   const setup = () => {
-    const locations = [
-      { id: 123, name: 'Lugo', distance: { units: 150, measure: 'km' } },
-      { id: 456, name: 'Asturias', distance: { units: 300, measure: 'km' } },
+    const location = { id: 123, name: 'Lugo', distance: { units: 150, measure: 'km' } };
+    const args = [
+      {
+        location,
+        product: { id: 'product1-id', name: 'Galletas' },
+        price: { units: 5, currency: '€', measure: 'kg' },
+        quantity: { units: 200, measure: 'kg' },
+      },
+      {
+        location,
+        product: { id: 'product2-id', name: 'Limones' },
+        price: { units: 7.50, currency: '€', measure: 'kg' },
+        quantity: { units: 20, measure: 'kg' },
+      }
     ];
-    const args = {
-      product: { id: 'product-id', name: 'Galletas' },
-      location: locations[0],
-      price: { units: 5, currency: '€', measure: 'kg' },
-      quantity: { units: 200, measure: 'kg' },
-      vehicleWeight: { units: 100, measure: 'kg' },
-    };
 
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <LocationProfitProvider initialValues={{ locations }}>
-        {children}
-      </LocationProfitProvider>
-    );
-    const renderComponent = () => render(<CostByLocation {...args} />, { wrapper });
-
+    const renderHookCosts = () => renderHook(() => useDeliveryCosts()).result.current;
     return {
+      location,
       args,
-      renderComponent,
+      renderHookCosts,
     };
   };
 
-  it('orderLineTotalPrice > calc total price of the order line', () => {
-    const { args, renderComponent } = setup();
-    renderComponent();
+  it('getOrderLinePrice > calc price of the order line', () => {
+    const { args, renderHookCosts } = setup();
+    const { getOrderLinePrice } = renderHookCosts();
+    const linePrice = getOrderLinePrice(args[0].price, args[0].quantity);
 
-    const { orderLineTotalPrice } = useDeliveryCosts(args);
-    const lineTotalPrice = orderLineTotalPrice();
-
-    expect(lineTotalPrice?.units).toBe(args.price.units * args.quantity.units);
-    expect(lineTotalPrice?.currency).toBe(args.price.currency);
-    expect(lineTotalPrice?.measure).toBe(args.price.measure);
+    expect(linePrice?.units).toBe(args[0].price.units * args[0].quantity.units);
+    expect(linePrice?.currency).toBe(args[0].price.currency);
   });
 
-  it('orderLineTotalPriceDevaluation > calc the price devaluation when we arrive to the location', () => {
-    const { args, renderComponent } = setup();
-    renderComponent();
+  it('getOrderPrice > calc total price of the order', () => {
+    const { location, args, renderHookCosts } = setup();
+    const { getOrderLinePrice, getOrderPrice } = renderHookCosts();
 
-    const { orderLineTotalPriceDevaluation, orderLineTotalPrice } = useDeliveryCosts(args);
-    const lineTotalPriceDevaluation = orderLineTotalPriceDevaluation();
-    const lineTotalPrice = orderLineTotalPrice();
+    const defaultPrice = { units: 0, currency: '€' };
+    const linePrices = [
+      {
+        location: location.id,
+        product: args[0].product.id,
+        linePrice: getOrderLinePrice(args[0].price, args[0].quantity) ?? defaultPrice,
+      },
+      {
+        location: location.id,
+        product: args[1].product.id,
+        linePrice: getOrderLinePrice(args[1].price, args[1].quantity) ?? defaultPrice,
+      }
+    ];
 
-    expect(lineTotalPriceDevaluation?.units).toBe(
-      (lineTotalPrice?.units ?? 0) * (args.location.distance.units * DevaluationPerKilometer.units) / 100
+    const totalPrice = getOrderPrice(location, linePrices);
+
+    expect(totalPrice?.units).toBe(
+      args[0].price.units * args[0].quantity.units + args[1].price.units * args[1].quantity.units
     );
-    expect(lineTotalPriceDevaluation?.currency).toBe(DevaluationPerKilometer.currency);
+    expect(totalPrice?.currency).toBe(args[0].price.currency);
   });
 
-  it('travelsFromDistance > calc number of travels to transport all the quantity', () => {
-    const { args, renderComponent } = setup();
-    renderComponent();
+  it('checkOrderWeight > check if the vehicle can support the weight of the order', () => {
+    const { args, renderHookCosts } = setup();
+    const { checkOrderWeight } = renderHookCosts();
 
-    const { travelsFromDistance } = useDeliveryCosts(args);
-    const travels = travelsFromDistance();
+    const orderLines = [
+      { product: args[0].product.id, quantity: args[0].quantity },
+      { product: args[1].product.id, quantity: args[1].quantity },
+    ];
 
-    expect(travels).toBe(Math.ceil(args.location.distance.units / args.vehicleWeight.units));
+    expect(
+      checkOrderWeight(orderLines, { units: 500, measure: 'kg' })
+    ).toBe(true);
+
+    expect(
+      checkOrderWeight(orderLines, { units: 100, measure: 'kg' })
+    ).toBe(false);
   });
 
-  it('orderLineTransportCost > calc transport costs', () => {
-    const { args, renderComponent } = setup();
-    renderComponent();
+  it('getDevaluationCost > calc the price devaluation when we arrive to the location', () => {
+    const { location, args, renderHookCosts } = setup();
+    const { getDevaluationCost } = renderHookCosts();
+    const devaluationCost = getDevaluationCost(location, args[0].price);
 
-    const { orderLineTransportCost, travelsFromDistance } = useDeliveryCosts(args);
-    const lineTransportCost = orderLineTransportCost();
+    expect(devaluationCost?.units).toBe(
+      (args[0].price?.units ?? 0) * (location.distance.units * DevaluationPerKilometer.units) / 100
+    );
+    expect(devaluationCost?.currency).toBe(DevaluationPerKilometer.currency);
+  });
+
+  it('getTransportCost > calc transport costs', () => {
+    const { location, renderHookCosts } = setup();
+    const { getTransportCost } = renderHookCosts();
+    const transportCost = getTransportCost(location);
+
+    const vehicleCost = CostPerTravel.units;
+    const kilometersCost = location.distance.units * CostPerKilometer.units;
+
+    expect(transportCost.units).toBe(vehicleCost + kilometersCost);
+    expect(transportCost.currency).toBe(CostPerTravel.currency);
+  });
+
+  it('getOrderProfit > calc profit', () => {
+    const { location, args, renderHookCosts } = setup();
+    const { getOrderLinePrice, getOrderPrice, getTransportCost, getDevaluationCost, getOrderProfit } = renderHookCosts();
     
-    const vehicleCost = travelsFromDistance() * CostPerTravel.units;
-    const kilometersCost = args.location.distance.units * CostPerKilometer.units;
+    const transportCost = getTransportCost(location);
+    const devaluationCost = getDevaluationCost(location, args[0].price);
 
-    expect(lineTransportCost.units).toBe(vehicleCost + kilometersCost);
-    expect(lineTransportCost.currency).toBe(CostPerTravel.currency);
-  });
+    const defaultPrice = { units: 0, currency: '€' };
+    const linePrices = [
+      {
+        location: location.id,
+        product: args[0].product.id,
+        linePrice: getOrderLinePrice(args[0].price, args[0].quantity) ?? defaultPrice,
+      },
+      {
+        location: location.id,
+        product: args[1].product.id,
+        linePrice: getOrderLinePrice(args[1].price, args[1].quantity) ?? defaultPrice,
+      }
+    ];
+    const totalPrice = getOrderPrice(location, linePrices);
 
-  it('orderLineProfit > calc profit', () => {
-    const { args, renderComponent } = setup();
-    renderComponent();
+    const lineProfit = getOrderProfit({
+      price: totalPrice,
+      transport: transportCost,
+      devaluation: devaluationCost,
+    });
 
-    const { orderLineProfit, orderLineTotalPrice, orderLineTotalPriceDevaluation, orderLineTransportCost } = useDeliveryCosts(args);
-    const lineProfit = orderLineProfit();
-
-    const totalPrice = orderLineTotalPrice();
-    const priceDevaluation = orderLineTotalPriceDevaluation();
-    const transportCost = orderLineTransportCost();
-    const lineProfitUnits = (totalPrice?.units ?? 0) - (priceDevaluation?.units ?? 0) - transportCost.units;
-
+    const lineProfitUnits = (totalPrice?.units ?? 0) - (devaluationCost?.units ?? 0) - transportCost.units;
     expect(lineProfit?.units).toBe(lineProfitUnits);
     expect(lineProfit?.currency).toBe(totalPrice?.currency);
     expect(lineProfit?.percentage).toBe(Math.round(lineProfitUnits * 100 / (totalPrice?.units ?? 0)));

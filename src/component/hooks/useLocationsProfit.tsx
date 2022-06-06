@@ -1,99 +1,117 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 
-import { Product, Order, Price, Location, Vehicle } from '../types';
+import { IdType, Product, Order, Price, Location, Vehicle, CurrencyProps, OrderLine } from '../types';
+import { useDeliveryCosts } from './';
 
-interface LocationProfitProps {
-  products?: Array<Product>;
-  order?: Order;
+interface InitialValuesProps {
+  products: Array<Product>;
+  order: Order;
   locations: Array<Location>;
-  prices?: Array<Price>;
-  vehicle?: Vehicle;
+  prices: Array<Price>;
+  vehicle: Vehicle;
 }
 
-interface ProfitProps {
+interface OrderLinePrice {
+  product: IdType;
+  location: IdType;
+  price: CurrencyProps;
+  linePrice: CurrencyProps;
+}
+export type ProfitProps = {
   location: Location;
-  product?: Product;
-  units: number;
-  currency: string;
+  totalPrice: CurrencyProps | undefined;
+  devaluationCost: CurrencyProps | undefined;
+  transportCost: CurrencyProps;
+  profit: CurrencyProps & { percentage: number } | undefined;
 }
 
 interface ProviderProps {
   children: ReactNode;
-  initialValues: LocationProfitProps;
+  initialValues: InitialValuesProps;
 }
-interface ContextProps extends LocationProfitProps {
+interface ContextProps extends InitialValuesProps {
+  orderLinePrices: Array<OrderLinePrice>;
   locationsProfits: Array<ProfitProps>;
-  updateLocationProfit: (props: ProfitProps) => void;
-  biggerLocationProfit: () => ProfitProps | undefined;
+  biggerLocationProfit: ProfitProps | undefined;
 }
 
 const LocationProfitContext = createContext<ContextProps | undefined>(undefined);
 
 const LocationProfitProvider = ({ children, initialValues }: ProviderProps) => {
+  const { getOrderLinePrice, checkOrderWeight, getDeliveryCosts } = useDeliveryCosts();
+
+  const [orderLinePrices, setOrderLinePrices] = useState<Array<OrderLinePrice>>([]);
   const [locationsProfits, setLocationsProfits] = useState<Array<ProfitProps>>([]);
+  const [biggerLocationProfit, setBiggerLocationProfit] = useState<ProfitProps | undefined>(undefined);
 
-  const updateLocationProfit = ({ location, product, units, currency }: ProfitProps) => {
-    const index = locationsProfits?.findIndex(locationMap => {
-      return locationMap.location.id === location.id && locationMap.product?.id === product?.id
-    });
-    if (index === -1) {
-      const copy = locationsProfits;
-      copy.push({
-        location,
-        product,
-        units,
-        currency,
-      });
-      setLocationsProfits(copy);
-    } else {
-      setLocationsProfits(
-        locationsProfits?.map(locationMap => {
-          if (locationMap.location.id === location.id && locationMap.product?.id === product?.id) {
-            locationMap.units = units;
-            locationMap.currency = currency;
-          }
-          return locationMap;
-        })
-      );
-    }
-  }
+  const updateOrderLinePrices = useCallback((location: Location, line: OrderLine) => {
+    const price = initialValues.prices.find(price => price.product === line.product && price.location === location.id);
+    if (price != null) {
+      const linePrice = getOrderLinePrice(price.price, line.quantity);
 
-  const groupByLocation = (items: Array<ProfitProps>) => {
-    return items.reduce((group, item) => {
-      const key = item.location.id.toString();
-      if (group[key] == null) {
-        group[key] = {
-          location: item.location,
-          units: item.units,
-          currency: item.currency,
+      if (linePrice != null) {
+        const newItem = {
+          location: location.id,
+          product: line.product,
+          price: price.price,
+          linePrice,
         };
+        const index = orderLinePrices?.findIndex(pricesMap => pricesMap.product === line.product && pricesMap.location === location.id);
+
+        const copy = orderLinePrices;
+        if (index === -1) {
+          copy.push(newItem);
+        } else {
+          copy[index] = newItem;
+        }
+        setOrderLinePrices(copy);
+      }
+    }
+  }, [getOrderLinePrice, initialValues.prices, orderLinePrices]);
+
+  const updateBiggerLocationProfit = useCallback((deliveryCosts: ProfitProps) => {
+    if (biggerLocationProfit == null || 
+      (deliveryCosts.profit != null && biggerLocationProfit.profit != null && deliveryCosts.profit.units > biggerLocationProfit.profit.units)) {
+      setBiggerLocationProfit(deliveryCosts);
+      return true;
+    }
+    return false;
+  }, [biggerLocationProfit]);
+
+  const updateLocationsProfits = useCallback((location: Location) => {
+    const deliveryCosts = getDeliveryCosts({ location, prices: orderLinePrices });
+    if (deliveryCosts != null) {
+      const index = locationsProfits?.findIndex(locationMap => locationMap.location.id === location.id);
+
+      const copy = locationsProfits;
+      if (index === -1) {
+        copy.push(deliveryCosts);
       } else {
-        group[key].units += item.units;
+        copy[index] = deliveryCosts;
       }
-      return group;
-    }, {} as Record<string, ProfitProps>);
-  }
+      setLocationsProfits(copy);
 
-  const sortByUnits = (items: Array<ProfitProps>) => {
-    return items.sort((a, b) => {
-      if ( a.units === b.units ) {
-        return 0;
-      }
-      return a.units > b.units ? 1 : -1;
-    });
-  }
+      updateBiggerLocationProfit(deliveryCosts);
+    }
+  }, [getDeliveryCosts, locationsProfits, orderLinePrices, updateBiggerLocationProfit]);
 
-  const biggerLocationProfit = () => {
-    const profitsByLocation = groupByLocation(locationsProfits);
-    var sorted = sortByUnits(Object.values(profitsByLocation)).reverse();
-    return sorted[0];
+  useEffect(() => {
+    const validWeight = checkOrderWeight(initialValues.order.lines, initialValues.vehicle.authorizedMaximumWeight);
+    if (validWeight === true) {
 
-  }
-
+      initialValues.locations.map(location => {
+        initialValues.order.lines.map(line => updateOrderLinePrices(location, line));
+        updateLocationsProfits(location);
+        return location;
+      });
+    }
+  }, [checkOrderWeight, updateLocationsProfits, updateOrderLinePrices,
+      initialValues.locations, initialValues.order.lines, initialValues.vehicle.authorizedMaximumWeight]);
+  
   return <LocationProfitContext.Provider value={{
     ...initialValues,
+    orderLinePrices,
     locationsProfits,
-    updateLocationProfit,
     biggerLocationProfit,
   }}>
     {children}
@@ -103,7 +121,7 @@ const LocationProfitProvider = ({ children, initialValues }: ProviderProps) => {
 const useLocationProfitContext = () => {
   const context = useContext(LocationProfitContext);
   if (context === undefined) {
-    throw new Error('useLocationProfit must be used within LocationProfitProvider');
+    throw new Error('useLocationProfitContext must be used within LocationProfitProvider');
   }
   return context;
 };

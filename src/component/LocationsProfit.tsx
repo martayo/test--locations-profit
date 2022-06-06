@@ -1,7 +1,8 @@
 import { Product, Order, Price, Location, Vehicle } from './types';
-import { LocationProfitProvider, findProductById } from './hooks';
-import { BiggerLocationProfit, OrderLineCard } from './elements';
-import { RootCard, HeadWrap, BodyWrap } from './styles/layout';
+import { LocationProfitProvider, useDeliveryCosts } from './hooks';
+import { Header, ProductCard, LocationCard } from './elements';
+import { RootCard, BodyWrap } from './styles/layout';
+import { Card, Error } from './styles/orderLineCard';
 
 export type LocationProfitProps = {
   products: Array<Product>;
@@ -17,45 +18,40 @@ const LocationProfit = ({
   locations,
   prices,
   vehicle,
-}: LocationProfitProps) => (
-  <RootCard>
-    <LocationProfitProvider initialValues={{
-      products,
-      order,
-      locations,
-      prices,
-      vehicle,
-    }}>
+}: LocationProfitProps) => {
+  const { checkOrderWeight } = useDeliveryCosts();
+  const validWeight = checkOrderWeight(order.lines, vehicle.authorizedMaximumWeight);
 
-      <HeadWrap>
-        <h1>Beneficios por destino</h1>
-        <div>
-          <strong>{'Código de pedido:'}</strong> {order.id}<br />
-          <strong>{'Vehículo de transporte:'}</strong> {vehicle.name}<br />
-          <strong>{'Destino más rentable:'}</strong> <BiggerLocationProfit />
-        </div>
-      </HeadWrap>
-  
-      <BodyWrap>
-        { order.lines.map((line, index) => {
-          const product = findProductById(products, line.product);
-          if (product == null) {
-            return null;
-          }
+  return (
+    <RootCard>
+      <LocationProfitProvider initialValues={{
+        products,
+        order,
+        locations,
+        prices,
+        vehicle,
+      }}>
+        <Header />
+    
+        <BodyWrap>
+          <Card>
+            <div />
+            { products.map(product => <ProductCard key={product.id} product={product} />) }
+            <div />
+          </Card>
 
-          return (
-            <div key={`${order.id}-${index}`}>
-              <OrderLineCard
-                product={product}
-                quantity={line.quantity}
-              />
-            </div>
-          );
-        }) }
-      </BodyWrap>
+          { validWeight ? (
+            <>{ locations.map(location => <LocationCard key={location.id} location={location} />) }</>
+          ) : (
+            <Card>
+              <Error>{`Error: Peso máximo del vehículo superado`}</Error>
+            </Card>
+          )}
+        </BodyWrap>
 
-    </LocationProfitProvider>
-  </RootCard>
-);
+      </LocationProfitProvider>
+    </RootCard>
+  );
+};
 
 export default LocationProfit;

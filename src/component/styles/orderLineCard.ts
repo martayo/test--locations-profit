@@ -1,35 +1,41 @@
 import styled from 'styled-components';
 
-export const ProductCard = styled.div`
+export const Card = styled.div`
   background-color: #FFFFFE;
   box-shadow: 0 0 .25em #eee;
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  gap: 2em;
-  min-height: 100px;
   padding: .5em 3em .5em 2em;
   margin-bottom: 1em;
 
-  img {
-    width: 100%;
-    max-width: 130px;
+  span {
+    display: block;
+    color: #888;
+  }
+  > div {
+    width: 20%;
+    &:first-child {
+      width: 15%;
+    }
+    &:last-child {
+      width: 25%;
+    }
   }
 `;
 
-export const OrderLineDetails = styled.div`
-  min-width: 80px;
-
+export const ProductDetails = styled.div`
+  img {
+    height: 100%;
+    max-height: 80px;
+    float: left;
+    margin-right: .25em;
+  }
   h2 {
-    margin: 0;
+    margin: 1.2em 0 0;
     font-size: 1em;
   }
-`;
-
-export const LocationDetails = styled.div`
-  min-width: 200px;
-  padding-left: 1.25em;
 `;
 
 interface PercentageBarProps {
@@ -53,4 +59,8 @@ export const PercentageBar = styled.div<PercentageBarProps>`
     width: ${props => `${props.size}%`};
     height: 4px;
   }
+`;
+
+export const Error = styled.p`
+  color: red;
 `;

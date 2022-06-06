@@ -1,4 +1,4 @@
-const MeasureValues = {
+export const MeasureValues = {
   KG: 'kg',
   KM: 'km',
 };

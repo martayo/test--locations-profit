@@ -1,26 +1,37 @@
-import { MeasureProps, CurrencyProps, Product, Location } from '../types';
+import { useCallback } from 'react';
+import { IdType, CurrencyProps, MeasureProps, Location, OrderLine } from '../types';
+import { ProfitProps } from './';
 import { CostPerTravel, CostPerKilometer, DevaluationPerKilometer, Currency } from '../constants';
 
-export type DeliveryCostsConfigProps = {
-  product: Product;
-  quantity: MeasureProps;
+interface DeliveryCostProps {
   location: Location;
-  price?: MeasureProps & { currency: Currency };
-  vehicleWeight: MeasureProps;
+  prices: Array<TotalPriceProps>;
+}
+
+interface TotalPriceProps {
+  location: IdType;
+  product: IdType;
+  linePrice: CurrencyProps;
+}
+interface ProfitFunctionsProps {
+  price?: CurrencyProps;
+  transport: CurrencyProps;
+  devaluation?: CurrencyProps;
+}
+
+interface DeliveryCostFunctionsProps {
+  getOrderLinePrice: (price: MeasureProps & { currency: Currency }, quantity: MeasureProps) => CurrencyProps | undefined;
+  getOrderPrice: (location: Location, prices: Array<TotalPriceProps>) => CurrencyProps | undefined;
+  checkOrderWeight: (orderLines: Array<OrderLine>, vehicleWeight: MeasureProps) => boolean;
+  getDevaluationCost: (location: Location, price?: CurrencyProps) => CurrencyProps | undefined;
+  getTransportCost: (location: Location) => CurrencyProps;
+  getOrderProfit: (props: ProfitFunctionsProps) => CurrencyProps & { percentage: number } | undefined;
+  getDeliveryCosts: (props: DeliveryCostProps) => ProfitProps | undefined;
 };
 
-export type DeliveryCostsFunctionsProps = {
-  orderLineTotalPrice: () => MeasureProps & { currency: Currency } | undefined;
-  orderLineTotalPriceDevaluation: () => CurrencyProps | undefined;
-  travelsFromDistance: () => number;
-  orderLineTransportCost: () => CurrencyProps;
-  orderLineProfit: () => CurrencyProps & { percentage: number } | undefined;
-};
+const useDeliveryCosts = (): DeliveryCostFunctionsProps => {
 
-const useDeliveryCosts = (props: DeliveryCostsConfigProps): DeliveryCostsFunctionsProps => {
-  const { location, price, quantity, vehicleWeight } = props;
-
-  const orderLineTotalPrice = () => {
+  const getOrderLinePrice = (price: MeasureProps & { currency: Currency }, quantity: MeasureProps) => {
     if (price == null || price.measure !== quantity.measure) {
       // TODO: If the measures are different, we should convert them to a common measure
       return undefined;
@@ -29,66 +40,95 @@ const useDeliveryCosts = (props: DeliveryCostsConfigProps): DeliveryCostsFunctio
     return {
       units: price.units * quantity.units,
       currency: price.currency,
-      measure: price.measure,
     };
   }
 
-  const orderLineTotalPriceDevaluation = () => {
-    const lineTotalPrice = orderLineTotalPrice();
-    if (lineTotalPrice == null || lineTotalPrice.currency !== DevaluationPerKilometer.currency) {
+  const getOrderPrice = useCallback((location: Location, prices: Array<TotalPriceProps>) => {
+    const pricesLocation = prices.filter(price => price.location === location.id);
+    if (pricesLocation == null) {
+      return undefined;
+    }
+
+    const totalUnits = pricesLocation.reduce((total, price) => total + price.linePrice.units, 0);
+    return {
+      units: totalUnits,
+      currency: prices[0].linePrice.currency,
+    };
+  }, []);
+
+  const checkOrderWeight = useCallback((orderLines: Array<OrderLine>, vehicleWeight: MeasureProps) => {
+    const orderWeight = orderLines.reduce((total, line) => total + line.quantity.units, 0);
+
+    return vehicleWeight.units >= orderWeight;
+  }, []);
+
+  const getDevaluationCost = useCallback((location: Location, price?: CurrencyProps) => {
+    if (price == null || price.currency !== DevaluationPerKilometer.currency) {
       // TODO: If the currencies are different, we should convert them to a common currency
       return undefined;
     }
 
     return {
-      units: lineTotalPrice.units * (location.distance.units * DevaluationPerKilometer.units) / 100,
+      units: price.units * (location.distance.units * DevaluationPerKilometer.units) / 100,
       currency: DevaluationPerKilometer.currency,
     };
-  }
-
-  const travelsFromDistance = () => {
-    return Math.ceil(location.distance.units / vehicleWeight.units);
-  }
-
-  const orderLineTransportCost = () => {
-    const travels = travelsFromDistance();
+  }, []);
   
-    const vehicleCost = travels * CostPerTravel.units;
+  const getTransportCost = useCallback((location: Location) => {
+    const vehicleCost = CostPerTravel.units;
     const kilometersCost = location.distance.units * CostPerKilometer.units;
   
     return {
       units: vehicleCost + kilometersCost,
       currency: CostPerTravel.currency,
     };
-  }
+  }, []);
 
-  const orderLineProfit = () => {
-    const lineTotalPrice = orderLineTotalPrice();
-    const lineTotalPriceDevaluation = orderLineTotalPriceDevaluation();
-    const lineTransportCost = orderLineTransportCost();
-
-    if (lineTotalPrice == null || 
-        lineTotalPriceDevaluation == null || 
-        lineTotalPrice.currency !== lineTotalPriceDevaluation.currency || 
-        lineTotalPrice.currency !== lineTransportCost.currency) {
+  const getOrderProfit = useCallback(({ price, transport, devaluation }: ProfitFunctionsProps) => {
+    if (devaluation == null || price == null || 
+        price.currency !== devaluation.currency || price.currency !== transport.currency) {
       // TODO: If the currencies are different, we should convert them to a common currency
       return undefined;
     }
 
-    const lineProfitUnits = lineTotalPrice.units - lineTotalPriceDevaluation.units - lineTransportCost.units;
+    const profit = price.units - devaluation.units - transport.units;
     return {
-      units: lineProfitUnits,
-      currency: lineTotalPrice.currency,
-      percentage: lineProfitUnits >= 0 ? Math.round(lineProfitUnits * 100 / lineTotalPrice.units) : 0,
+      units: profit,
+      currency: price.currency,
+      percentage: profit >= 0 ? Math.round(profit * 100 / price.units) : 0,
     };
-  }
+  }, []);
+
+  const getDeliveryCosts = useCallback(({ location, prices }: DeliveryCostProps) => {
+    const totalPrice = getOrderPrice(location, prices);
+    const transportCost = getTransportCost(location);
+    const devaluationCost = getDevaluationCost(location, totalPrice);
+    const profit = getOrderProfit({
+      price: totalPrice,
+      transport: transportCost,
+      devaluation: devaluationCost
+    });
+
+    if (profit == null) {
+      return undefined;
+    }
+    return {
+      location,
+      totalPrice,
+      devaluationCost,
+      transportCost,
+      profit,
+    };
+  }, [getDevaluationCost, getOrderPrice, getOrderProfit, getTransportCost]);
 
   return {
-    orderLineTotalPrice,
-    orderLineTotalPriceDevaluation,
-    travelsFromDistance,
-    orderLineTransportCost,
-    orderLineProfit,
+    getOrderLinePrice,
+    getOrderPrice,
+    checkOrderWeight,
+    getDevaluationCost,
+    getTransportCost,
+    getOrderProfit,
+    getDeliveryCosts,
   };
 };
 

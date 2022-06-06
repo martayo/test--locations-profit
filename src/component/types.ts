@@ -9,37 +9,39 @@ export interface MeasureProps {
   measure: Measure;
 }
 
+export type IdType = number | string;
+
 export interface Product {
-  id: number | string;
+  id: IdType;
   name: string;
   image?: string;
 }
 
 export interface Order {
-  id: number | string;
+  id: IdType;
   lines: Array<OrderLine>;
 }
 export interface OrderLine {
-  product: number | string;
+  product: IdType;
   quantity: MeasureProps;
 }
 
 export interface Location {
-  id: number | string;
+  id: IdType;
   name: string;
   distance: MeasureProps;
 }
 
 export interface Price {
-  product: number | string;
-  location: number | string;
+  product: IdType;
+  location: IdType;
   price: MeasureProps & {
     currency: Currency;
   };
 }
 
 export interface Vehicle {
-  id: number | string;
+  id: IdType;
   name: string;
   authorizedMaximumWeight: MeasureProps;
 }

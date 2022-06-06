@@ -1,38 +1,23 @@
-import { MeasureProps, Product } from '../types';
-import { ProductCard, OrderLineDetails, LocationDetails } from '../styles/orderLineCard';
-import { CostByLocation } from '.';
-import { useLocationProfitContext, findPriceByProductAndLocation } from '../hooks';
+import { Location, OrderLine } from '../types';
+import { useLocationProfitContext, formatCurrency } from '../hooks';
 
 interface Props {
-  product: Product;
-  quantity: MeasureProps;
+  location: Location;
+  line: OrderLine;
 }
 
-const OrderLineCard = ({ product, quantity }: Props) => {
-  const { locations, prices, vehicle } = useLocationProfitContext();
+const OrderLineCard = ({ location, line }: Props) => {
+  const { orderLinePrices } = useLocationProfitContext();
+  const linePrice = orderLinePrices.find(price => price.product === line.product && price.location === location.id);
+  if (linePrice == null) {
+    return null;
+  }
 
   return (
-    <ProductCard>
-      { product.image != null && <img src={product.image} alt={product.name} /> }
-  
-      <OrderLineDetails>
-        <h2>{product.name}</h2>
-        <span>{`${quantity.units} ${quantity.measure}`}</span>
-      </OrderLineDetails>
-  
-      { prices != null && vehicle != null && locations.map(location => (
-        <LocationDetails key={location.id}>
-          <strong>{location.name}</strong>
-          <CostByLocation
-            product={product}
-            price={findPriceByProductAndLocation(prices, product.id, location.id)?.price}
-            location={location}
-            quantity={quantity}
-            vehicleWeight={vehicle.authorizedMaximumWeight}
-          />
-        </LocationDetails>
-      )) }
-    </ProductCard>
+    <div>
+      <div>{`PVP: ${formatCurrency(linePrice.price)}`}</div>
+      <span>{`Subtotal: ${formatCurrency(linePrice.linePrice)}`}</span>
+    </div>
   );
 };
 
